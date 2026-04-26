@@ -5,10 +5,17 @@ import getpass
 import hashlib
 import json
 import sys
+from pathlib import Path
 
-from .config import METRICS_PATH, read_settings, write_settings
+from .config import DATA_DIR, METRICS_PATH, read_settings, write_settings
 from .config import score_to_level
-from .diagnostics import format_overfit_report, load_diagnostic_examples, run_overfit_check
+from .diagnostics import (
+    format_overfit_report,
+    load_diagnostic_examples,
+    plot_loss_curve,
+    run_loss_curve,
+    run_overfit_check,
+)
 from .model import MODEL_VERSION, UrgencyScorer, train_model
 from .review import ReviewServer
 from .slack_client import SlackPriorityService
@@ -56,6 +63,21 @@ def main() -> None:
     overfit.add_argument("--min-freq", type=int, default=2)
     overfit.add_argument("--no-shuffle-baseline", action="store_true")
     overfit.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    loss_curve = subparsers.add_parser("learning-curve", help="Plot training iteration vs loss.")
+    loss_curve.add_argument("--output", default=str(DATA_DIR / "loss_curve.png"))
+    loss_curve.add_argument("--public-limit", type=int, default=1000)
+    loss_curve.add_argument("--local-only", action="store_true", help="Use only your locally labeled Slack examples.")
+    loss_curve.add_argument("--epochs", type=int, default=5)
+    loss_curve.add_argument("--batch-size", type=int, default=128)
+    loss_curve.add_argument("--local-weight", type=float, default=5.0)
+    loss_curve.add_argument("--learning-rate", type=float, default=1e-3)
+    loss_curve.add_argument("--seed", type=int, default=42)
+    loss_curve.add_argument("--validation-fraction", type=float, default=0.2)
+    loss_curve.add_argument("--max-vocab", type=int, default=4096)
+    loss_curve.add_argument("--min-freq", type=int, default=2)
+    loss_curve.add_argument("--log-every", type=int, default=1)
+    loss_curve.add_argument("--json", action="store_true", help="Print curve data as JSON instead of plotting.")
 
     score = subparsers.add_parser("score", help="Score one text string.")
     score.add_argument("text")
@@ -145,6 +167,48 @@ def main() -> None:
             print(json.dumps(report, indent=2))
         else:
             print(format_overfit_report(report))
+        return
+
+    if args.command == "learning-curve":
+        store = Store()
+        try:
+            examples = load_diagnostic_examples(
+                store=store,
+                public_limit=args.public_limit,
+                local_weight=args.local_weight,
+                local_only=args.local_only,
+            )
+        finally:
+            store.close()
+        try:
+            report = run_loss_curve(
+                examples,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                seed=args.seed,
+                validation_fraction=args.validation_fraction,
+                max_vocab=args.max_vocab,
+                min_freq=args.min_freq,
+                log_every=args.log_every,
+            )
+        except ValueError as error:
+            print(str(error))
+            sys.exit(1)
+
+        if args.json:
+            print(json.dumps(report, indent=2))
+            return
+
+        try:
+            output_path = plot_loss_curve(report, Path(args.output))
+        except ImportError:
+            print(
+                "Missing matplotlib. Run this command with: "
+                "uv run --with matplotlib python -m slack_priority learning-curve"
+            )
+            sys.exit(1)
+        print(f"Wrote {output_path}")
         return
 
     if args.command == "score":

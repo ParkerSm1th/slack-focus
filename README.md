@@ -191,6 +191,16 @@ uv run python -m slack_priority overfit-check --local-only
 
 The overfit check trains temporary in-memory models only. It does not overwrite your saved model. It reports train vs validation metrics, compares against a constant-score baseline, and runs a shuffled-label sanity check. Watch for a large train/validation gap or a model that does not clearly beat the baselines.
 
+Plot a Matplotlib learning curve with training iteration on the x-axis and loss on the y-axis:
+
+```bash
+uv run --with matplotlib python -m slack_priority learning-curve \
+  --local-only \
+  --output data/loss_curve.png
+```
+
+If training loss keeps falling while validation loss rises, the model is probably overfitting. If both losses fall and stay close, more training is helping.
+
 ## Building A DMG
 
 Build a local unsigned DMG:

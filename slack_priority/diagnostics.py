@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -162,6 +163,166 @@ def run_overfit_check(
     }
 
 
+def run_loss_curve(
+    examples: list[DiagnosticExample],
+    *,
+    epochs: int = 5,
+    batch_size: int = 128,
+    learning_rate: float = 1e-3,
+    seed: int = 42,
+    validation_fraction: float = 0.2,
+    max_vocab: int = 4096,
+    min_freq: int = 2,
+    log_every: int = 1,
+) -> dict:
+    if len(examples) < 20:
+        raise ValueError(
+            "Need at least 20 labeled examples for a loss curve. "
+            "Label more Slack messages or include public examples with --public-limit."
+        )
+    if not 0.05 <= validation_fraction <= 0.5:
+        raise ValueError("validation_fraction must be between 0.05 and 0.5")
+    if log_every < 1:
+        raise ValueError("log_every must be at least 1")
+
+    texts = [example.text for example in examples]
+    targets = np.array([example.score for example in examples], dtype=np.float32)
+    weights = np.array([example.weight for example in examples], dtype=np.float32)
+    sources = [example.source for example in examples]
+
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(len(examples))
+    validation_size = max(10, int(len(examples) * validation_fraction))
+    validation_size = min(validation_size, len(examples) - 1)
+    val_indices = indices[:validation_size]
+    train_indices = indices[validation_size:]
+
+    train_texts = [texts[i] for i in train_indices]
+    vocab = build_vocab(train_texts, max_tokens=max_vocab, min_freq=min_freq)
+    if not vocab:
+        raise ValueError("No vocabulary terms were produced from the training split.")
+
+    model = UrgencyMLP(len(vocab))
+    optimizer = optim.Adam(learning_rate=learning_rate)
+    mx.eval(model.state, optimizer.state)
+
+    def loss_fn(model: UrgencyMLP, x: mx.array, y: mx.array, w: mx.array) -> mx.array:
+        pred = mx.sigmoid(model(x))
+        return (((pred - y) ** 2) * w).mean()
+
+    loss_and_grad = nn.value_and_grad(model, loss_fn)
+
+    def step(x: mx.array, y: mx.array, w: mx.array) -> mx.array:
+        loss, grads = loss_and_grad(model, x, y, w)
+        optimizer.update(model, grads)
+        return loss
+
+    train_step = mx.compile(
+        step,
+        inputs=[model.state, optimizer.state],
+        outputs=[model.state, optimizer.state],
+    )
+
+    points = []
+    iteration = 0
+    for epoch in range(1, epochs + 1):
+        epoch_indices = rng.permutation(train_indices)
+        for start in range(0, len(epoch_indices), batch_size):
+            batch_indices = epoch_indices[start : start + batch_size]
+            x = mx.array(vectorize([texts[i] for i in batch_indices], vocab))
+            y = mx.array(targets[batch_indices])
+            w = mx.array(weights[batch_indices])
+            loss = train_step(x, y, w)
+            mx.eval(model.state, optimizer.state, loss)
+            iteration += 1
+
+            if iteration == 1 or iteration % log_every == 0:
+                points.append(
+                    {
+                        "iteration": iteration,
+                        "epoch": epoch,
+                        "train_loss": float(loss.item()),
+                        "validation_loss": _loss_for_indices(
+                            model=model,
+                            vocab=vocab,
+                            texts=texts,
+                            targets=targets,
+                            weights=weights,
+                            indices=val_indices,
+                            batch_size=batch_size,
+                        ),
+                    }
+                )
+
+    source_counts = {
+        "public": sum(1 for source in sources if source == "public"),
+        "local": sum(1 for source in sources if source == "local"),
+    }
+    return {
+        "examples": {
+            "total": len(examples),
+            "public": source_counts["public"],
+            "local": source_counts["local"],
+            "train": len(train_indices),
+            "validation": len(val_indices),
+        },
+        "settings": {
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "seed": seed,
+            "validation_fraction": validation_fraction,
+            "vocab_size": len(vocab),
+            "max_vocab": max_vocab,
+            "min_freq": min_freq,
+            "log_every": log_every,
+        },
+        "points": points,
+    }
+
+
+def plot_loss_curve(report: dict, output_path: Path) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    points = report["points"]
+    iterations = [point["iteration"] for point in points]
+    train_losses = [point["train_loss"] for point in points]
+    validation_losses = [point["validation_loss"] for point in points]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(iterations, train_losses, color="#2563eb", linewidth=2, label="train batch loss")
+    ax.plot(
+        iterations,
+        validation_losses,
+        color="#dc2626",
+        linewidth=2,
+        marker="o",
+        markersize=3,
+        label="validation loss",
+    )
+    ax.set_title("Slack Focus Loss Curve")
+    ax.set_xlabel("Training iteration")
+    ax.set_ylabel("Weighted MSE loss")
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+
+    examples = report["examples"]
+    settings = report["settings"]
+    caption = (
+        f"{examples['train']} train / {examples['validation']} validation examples, "
+        f"epochs={settings['epochs']}, batch={settings['batch_size']}, vocab={settings['vocab_size']}"
+    )
+    fig.text(0.5, 0.01, caption, ha="center", fontsize=9)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+    return output_path
+
+
 def format_overfit_report(report: dict) -> str:
     examples = report["examples"]
     settings = report["settings"]
@@ -229,6 +390,31 @@ def format_overfit_report(report: dict) -> str:
         lines.append("Warnings: none")
 
     return "\n".join(lines)
+
+
+def _loss_for_indices(
+    *,
+    model: UrgencyMLP,
+    vocab: dict[str, int],
+    texts: list[str],
+    targets: np.ndarray,
+    weights: np.ndarray,
+    indices: np.ndarray,
+    batch_size: int,
+) -> float:
+    weighted_loss = 0.0
+    count = 0
+    for start in range(0, len(indices), batch_size):
+        batch_indices = indices[start : start + batch_size]
+        x = mx.array(vectorize([texts[i] for i in batch_indices], vocab))
+        y = mx.array(targets[batch_indices])
+        w = mx.array(weights[batch_indices])
+        pred = mx.sigmoid(model(x))
+        loss = (((pred - y) ** 2) * w).mean()
+        mx.eval(loss)
+        weighted_loss += float(loss.item()) * len(batch_indices)
+        count += len(batch_indices)
+    return weighted_loss / max(count, 1)
 
 
 def _train_temporary_model(

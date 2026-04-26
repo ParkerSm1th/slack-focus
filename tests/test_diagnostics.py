@@ -3,6 +3,7 @@ import pytest
 from slack_priority.diagnostics import (
     DiagnosticExample,
     format_overfit_report,
+    run_loss_curve,
     run_overfit_check,
 )
 
@@ -68,3 +69,20 @@ def test_overfit_check_returns_report_without_saving_model():
 def test_overfit_check_requires_enough_examples():
     with pytest.raises(ValueError, match="Need at least 20"):
         run_overfit_check(_examples()[:5], epochs=1)
+
+
+def test_loss_curve_reports_iteration_losses():
+    report = run_loss_curve(
+        _examples(),
+        epochs=2,
+        batch_size=4,
+        max_vocab=64,
+        min_freq=1,
+        log_every=1,
+    )
+
+    assert report["examples"]["total"] == 24
+    assert report["points"]
+    assert report["points"][0]["iteration"] == 1
+    assert all(point["train_loss"] >= 0 for point in report["points"])
+    assert all(point["validation_loss"] >= 0 for point in report["points"])
