@@ -171,6 +171,12 @@ uv run python -m slack_priority score "prod checkout is down"
 uv run python -m slack_priority listen
 ```
 
+Compare eager MLX execution against `mx.compile` for the local classifier:
+
+```bash
+uv run python scripts/benchmark_mlx_compile.py
+```
+
 ## Building A DMG
 
 Build a local unsigned DMG:
