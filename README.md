@@ -177,6 +177,20 @@ Compare eager MLX execution against `mx.compile` for the local classifier:
 uv run python scripts/benchmark_mlx_compile.py
 ```
 
+Check whether the model looks overfit:
+
+```bash
+uv run python -m slack_priority overfit-check
+```
+
+For the most honest personal check, use only your own labeled Slack examples:
+
+```bash
+uv run python -m slack_priority overfit-check --local-only
+```
+
+The overfit check trains temporary in-memory models only. It does not overwrite your saved model. It reports train vs validation metrics, compares against a constant-score baseline, and runs a shuffled-label sanity check. Watch for a large train/validation gap or a model that does not clearly beat the baselines.
+
 ## Building A DMG
 
 Build a local unsigned DMG:

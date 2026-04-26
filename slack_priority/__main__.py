@@ -8,6 +8,7 @@ import sys
 
 from .config import METRICS_PATH, read_settings, write_settings
 from .config import score_to_level
+from .diagnostics import format_overfit_report, load_diagnostic_examples, run_overfit_check
 from .model import MODEL_VERSION, UrgencyScorer, train_model
 from .review import ReviewServer
 from .slack_client import SlackPriorityService
@@ -41,6 +42,20 @@ def main() -> None:
     train.add_argument("--epochs", type=int, default=5)
     train.add_argument("--local-weight", type=float, default=5.0)
     train.add_argument("--learning-rate", type=float, default=1e-3)
+
+    overfit = subparsers.add_parser("overfit-check", help="Run train/validation diagnostics for overfitting.")
+    overfit.add_argument("--public-limit", type=int, default=1000)
+    overfit.add_argument("--local-only", action="store_true", help="Use only your locally labeled Slack examples.")
+    overfit.add_argument("--epochs", type=int, default=5)
+    overfit.add_argument("--batch-size", type=int, default=128)
+    overfit.add_argument("--local-weight", type=float, default=5.0)
+    overfit.add_argument("--learning-rate", type=float, default=1e-3)
+    overfit.add_argument("--seed", type=int, default=42)
+    overfit.add_argument("--validation-fraction", type=float, default=0.2)
+    overfit.add_argument("--max-vocab", type=int, default=4096)
+    overfit.add_argument("--min-freq", type=int, default=2)
+    overfit.add_argument("--no-shuffle-baseline", action="store_true")
+    overfit.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     score = subparsers.add_parser("score", help="Score one text string.")
     score.add_argument("text")
@@ -97,6 +112,39 @@ def main() -> None:
             learning_rate=args.learning_rate,
         )
         print(json.dumps(result.metrics, indent=2))
+        return
+
+    if args.command == "overfit-check":
+        store = Store()
+        try:
+            examples = load_diagnostic_examples(
+                store=store,
+                public_limit=args.public_limit,
+                local_weight=args.local_weight,
+                local_only=args.local_only,
+            )
+        finally:
+            store.close()
+        try:
+            report = run_overfit_check(
+                examples,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                seed=args.seed,
+                validation_fraction=args.validation_fraction,
+                max_vocab=args.max_vocab,
+                min_freq=args.min_freq,
+                shuffle_baseline=not args.no_shuffle_baseline,
+            )
+        except ValueError as error:
+            print(str(error))
+            sys.exit(1)
+
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(format_overfit_report(report))
         return
 
     if args.command == "score":
