@@ -35,6 +35,19 @@ For normal use, download the latest `Slack-Focus-macOS.dmg` from GitHub Releases
 
 [Latest releases](https://github.com/ParkerSm1th/slack-focus/releases)
 
+### Gatekeeper Notice
+
+macOS will show `"Slack Focus.app" Not Opened` for unsigned or unnotarized builds. That is Apple Gatekeeper saying the app was not notarized by Apple, not a Slack Focus runtime error.
+
+For a local unsigned build, you can open it with:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Slack Focus.app"
+open "/Applications/Slack Focus.app"
+```
+
+For a public release that opens normally on other Macs, the DMG must be Developer ID signed and notarized. The release workflow supports notarization when the repository has the Apple signing secrets listed below.
+
 Requirements:
 
 - macOS 13 or newer.
@@ -162,6 +175,16 @@ The output is:
 dist/Slack-Focus-macOS.dmg
 ```
 
+Build a signed and notarized DMG:
+
+```bash
+CODE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+APPLE_ID="you@example.com" \
+APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
+APPLE_TEAM_ID="TEAMID" \
+scripts/build_dmg.sh
+```
+
 The DMG contains:
 
 - The Swift macOS app bundle.
@@ -188,6 +211,20 @@ git push origin v0.1.0
 ```
 
 GitHub Actions builds the DMG and attaches it to the release automatically.
+
+To publish a Gatekeeper-friendly DMG, configure these GitHub repository secrets before tagging:
+
+| Secret | Description |
+| --- | --- |
+| `APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64` | Base64-encoded `.p12` Developer ID Application certificate. |
+| `APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD` | Password for the `.p12` certificate. |
+| `APPLE_DEVELOPER_ID_APPLICATION_IDENTITY` | Codesign identity, such as `Developer ID Application: Your Name (TEAMID)`. |
+| `APPLE_BUILD_KEYCHAIN_PASSWORD` | Temporary keychain password for GitHub Actions. |
+| `APPLE_ID` | Apple ID used with `notarytool`. |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for notarization. |
+| `APPLE_TEAM_ID` | Apple Developer Team ID. |
+
+Without those secrets, releases are ad-hoc signed and will require manual Gatekeeper approval.
 
 ## Repository Hygiene
 
