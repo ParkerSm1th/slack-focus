@@ -8,9 +8,11 @@ It is built for people who want a calmer Slack workflow without sending private 
 
 ## What It Does
 
+Slack has two painful modes: keep notifications on and get interrupted all day, or mute them and risk missing the message that actually matters. Slack Focus gives you a middle path.
+
 - Watches Slack through your own authorized Slack user token.
 - Scores messages from `0.0` to `1.0` with a small local MLX model.
-- Shows every captured message with its score and priority level.
+- Shows every captured message with its score and priority level, even when it does not notify you.
 - Sends macOS notifications only at or above your configured level.
 - Opens Slack directly to the relevant channel when you click a notification.
 - Lets you label examples as `ignore`, `low`, `high`, or `critical`.
@@ -114,11 +116,19 @@ Default notification policy is `high+`.
 
 ## How The Model Works
 
-The classifier is deliberately small:
+The classifier is deliberately small. It is not an LLM and does not call a hosted AI API.
 
 ```text
 message text -> cleanup -> bag-of-words vocabulary -> MLX MLP -> urgency score
 ```
+
+In plain English:
+
+- Slack Focus cleans the message text by masking things like user IDs, channel IDs, URLs, and code blocks.
+- It converts the message into bag-of-words features, which are simple word-count style inputs.
+- A small multilayer perceptron, or MLP, predicts an urgency score from `0.0` to `1.0`.
+- Thresholds turn that score into `ignore`, `low`, `medium`, `high`, or `critical`.
+- Only messages at or above your notification level trigger a macOS notification.
 
 Training uses:
 
@@ -126,6 +136,8 @@ Training uses:
 - Your local Slack labels with extra weight so the model personalizes quickly.
 
 Public bootstrap data is fetched from `Prady06/customer-support-tickets` on Hugging Face. That dataset is licensed `CC-BY-NC-4.0`, so treat bootstrap-trained weights as non-commercial unless you retrain without that data.
+
+The tradeoff is intentional: this model is much smaller than an LLM, so it is fast and private, but it improves mostly through examples you label.
 
 ## Developer Setup
 
@@ -199,6 +211,8 @@ git push origin v0.1.0
 ```
 
 GitHub Actions builds the DMG and attaches it to the release automatically.
+
+The workflow also builds the DMG on `main` pushes as a validation check. It only uploads release assets for version tags.
 
 ## Repository Hygiene
 
