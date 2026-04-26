@@ -23,12 +23,21 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Import Developer ID certificate
-        if: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 != '' }}
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.APPLE_BUILD_KEYCHAIN_PASSWORD }}
         run: |
+          if [[ -z "${APPLE_CERTIFICATE_BASE64:-}" ]]; then
+            echo "No Apple Developer ID certificate configured; building unsigned DMG."
+            exit 0
+          fi
+
+          if [[ -z "${APPLE_CERTIFICATE_PASSWORD:-}" || -z "${KEYCHAIN_PASSWORD:-}" ]]; then
+            echo "::error::APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD and APPLE_BUILD_KEYCHAIN_PASSWORD are required when signing certificate is configured."
+            exit 1
+          fi
+
           CERTIFICATE_PATH="$RUNNER_TEMP/developer-id-application.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
 
