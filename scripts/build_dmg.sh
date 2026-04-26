@@ -10,10 +10,6 @@ BUILD_DIR="$ROOT/release-build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 RUNTIME_DIR="$APP_PATH/Contents/Resources/SlackFocusRuntime"
 DMG_PATH="$DIST_DIR/Slack-Focus-macOS.dmg"
-CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-}"
-APPLE_ID="${APPLE_ID:-}"
-APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD:-}"
-APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 
 rm -rf "$BUILD_DIR" "$DIST_DIR"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$RUNTIME_DIR" "$DIST_DIR"
@@ -60,19 +56,8 @@ find "$RUNTIME_DIR" -name "__pycache__" -type d -prune -exec rm -rf {} +
 find "$RUNTIME_DIR" -name "*.pyc" -delete
 mkdir -p "$RUNTIME_DIR/data" "$RUNTIME_DIR/models"
 
-if [[ -n "$CODE_SIGN_IDENTITY" ]]; then
-    echo "Signing app with Developer ID identity: $CODE_SIGN_IDENTITY"
-    codesign \
-        --force \
-        --deep \
-        --options runtime \
-        --timestamp \
-        --sign "$CODE_SIGN_IDENTITY" \
-        "$APP_PATH"
-else
-    echo "No CODE_SIGN_IDENTITY set; using ad-hoc signature. Gatekeeper will require manual approval."
-    codesign --force --deep --sign - "$APP_PATH"
-fi
+echo "Applying ad-hoc signature. Gatekeeper will require manual approval."
+codesign --force --deep --sign - "$APP_PATH"
 
 hdiutil create \
     -volname "$APP_NAME" \
@@ -80,25 +65,5 @@ hdiutil create \
     -ov \
     -format UDZO \
     "$DMG_PATH"
-
-if [[ -n "$CODE_SIGN_IDENTITY" ]]; then
-    echo "Signing DMG with Developer ID identity: $CODE_SIGN_IDENTITY"
-    codesign --force --timestamp --sign "$CODE_SIGN_IDENTITY" "$DMG_PATH"
-fi
-
-if [[ -n "$CODE_SIGN_IDENTITY" && -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
-    echo "Submitting DMG for Apple notarization..."
-    xcrun notarytool submit "$DMG_PATH" \
-        --apple-id "$APPLE_ID" \
-        --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-        --team-id "$APPLE_TEAM_ID" \
-        --wait
-
-    echo "Stapling notarization ticket..."
-    xcrun stapler staple "$DMG_PATH"
-    xcrun stapler validate "$DMG_PATH"
-else
-    echo "Skipping notarization. Set CODE_SIGN_IDENTITY, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID to notarize."
-fi
 
 echo "$DMG_PATH"
