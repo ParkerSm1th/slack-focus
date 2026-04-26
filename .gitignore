@@ -1,0 +1,27 @@
+# Local Python / Swift build outputs
+.venv/
+.build/
+.pytest_cache/
+dist/
+release-build/
+
+# Local OS/editor state
+.DS_Store
+.env
+*.swp
+*.swo
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Private local app state. Never commit Slack messages, tokens, labels, or weights.
+data/
+models/
+
+# Local Codex/agent context
+.agents/
+skills-lock.json
+
+# Generated/experimental notification artwork
+assets/

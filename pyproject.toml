@@ -1,0 +1,19 @@
+[project]
+name = "slack-focus"
+version = "0.1.0"
+description = "A local MLX-powered Slack focus and priority filter for macOS."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx>=0.31.1",
+    "numpy>=2.0",
+    "slack-sdk>=3.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
