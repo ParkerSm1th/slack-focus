@@ -777,14 +777,7 @@ struct LiquidControlModifier: ViewModifier {
     let tint: Color
 
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: 0) {
-                content
-                    .glassEffect(.regular.tint(tint.opacity(0.18)).interactive(), in: .capsule)
-            }
-        } else {
-            content
-        }
+        content
     }
 }
 
