@@ -57,5 +57,6 @@ def test_train_save_and_score_tiny_model(tmp_path, monkeypatch):
 
     assert result.metrics["vocab_size"] > 0
     assert scorer.ready
+    assert scorer._predict is not None
     assert 0.0 <= score <= 1.0
     assert level in {"ignore", "low", "medium", "high", "critical"}

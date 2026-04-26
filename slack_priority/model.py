@@ -54,9 +54,12 @@ class UrgencyScorer:
         self.thresholds = thresholds or DEFAULT_THRESHOLDS
         self.vocab = self._load_vocab()
         self.model = UrgencyMLP(len(self.vocab))
+        self._predict = None
         if self.model_path.exists() and self.vocab:
             self.model.load_weights(str(self.model_path))
             mx.eval(self.model.parameters())
+            self._predict = self._compile_predict()
+            self._warm_predict()
 
     @property
     def ready(self) -> bool:
@@ -67,8 +70,9 @@ class UrgencyScorer:
             return 0.0
 
         features = vectorize([text], self.vocab)
-        logits = self.model(mx.array(features))
-        score = mx.sigmoid(logits)[0]
+        if self._predict is None:
+            self._predict = self._compile_predict()
+        score = self._predict(mx.array(features))[0]
         return float(score.item())
 
     def score_level(self, text: str) -> tuple[float, str]:
@@ -79,6 +83,18 @@ class UrgencyScorer:
         if not self.vocab_path.exists():
             return {}
         return json.loads(self.vocab_path.read_text())
+
+    def _compile_predict(self):
+        def predict(x: mx.array) -> mx.array:
+            return mx.sigmoid(self.model(x))
+
+        return mx.compile(predict, inputs=self.model.state)
+
+    def _warm_predict(self) -> None:
+        if not self._predict or not self.vocab:
+            return
+        dummy = mx.zeros((1, len(self.vocab)), dtype=mx.float32)
+        mx.eval(self._predict(dummy))
 
 
 def train_model(
@@ -130,6 +146,17 @@ def train_model(
         return (((pred - y) ** 2) * w).mean()
 
     loss_and_grad = nn.value_and_grad(model, loss_fn)
+
+    def step(x: mx.array, y: mx.array, w: mx.array) -> mx.array:
+        loss, grads = loss_and_grad(model, x, y, w)
+        optimizer.update(model, grads)
+        return loss
+
+    train_step = mx.compile(
+        step,
+        inputs=[model.state, optimizer.state],
+        outputs=[model.state, optimizer.state],
+    )
     target_array = np.array(targets, dtype=np.float32)
     weight_array = np.array(weights, dtype=np.float32)
 
@@ -141,9 +168,8 @@ def train_model(
             x = mx.array(vectorize(batch_texts, vocab))
             y = mx.array(target_array[batch_indices])
             w = mx.array(weight_array[batch_indices])
-            loss, grads = loss_and_grad(model, x, y, w)
-            optimizer.update(model, grads)
-            mx.eval(model.parameters(), optimizer.state, loss)
+            loss = train_step(x, y, w)
+            mx.eval(model.state, optimizer.state, loss)
 
     metrics = evaluate_model(model, vocab, texts, target_array, val_indices)
     metrics.update(
@@ -179,10 +205,11 @@ def evaluate_model(
     indices: np.ndarray,
 ) -> dict[str, float | int]:
     predictions = []
+    predict = _compile_predict_for_model(model)
     for start in range(0, len(indices), 256):
         batch_indices = indices[start : start + 256]
         x = mx.array(vectorize([texts[i] for i in batch_indices], vocab))
-        scores = mx.sigmoid(model(x))
+        scores = predict(x)
         predictions.extend(np.array(scores, dtype=np.float32).tolist())
 
     y_true = targets[indices]
@@ -206,3 +233,10 @@ def evaluate_model(
         "false_positive_high_plus": fp,
         "false_negative_high_plus": fn,
     }
+
+
+def _compile_predict_for_model(model: UrgencyMLP):
+    def predict(x: mx.array) -> mx.array:
+        return mx.sigmoid(model(x))
+
+    return mx.compile(predict, inputs=model.state)
